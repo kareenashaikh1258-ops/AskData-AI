@@ -8,9 +8,9 @@ from modules.preprocessor import preprocess_dataset
 from modules.query_engine import process_query
 
 
-# ===================================================
+# =========================================================
 # PAGE CONFIGURATION
-# ===================================================
+# =========================================================
 
 st.set_page_config(
     page_title="AskData AI",
@@ -19,9 +19,9 @@ st.set_page_config(
 )
 
 
-# ===================================================
-# APPLICATION HEADER
-# ===================================================
+# =========================================================
+# HEADER
+# =========================================================
 
 st.title("📊 AskData AI")
 
@@ -31,406 +31,767 @@ st.write(
     "Upload your dataset and ask questions using natural language."
 )
 
+st.divider()
 
-# ===================================================
-# DATASET UPLOAD
-# ===================================================
+
+# =========================================================
+# FILE UPLOADER
+# =========================================================
 
 uploaded_file = st.file_uploader(
-    "📂 Upload your dataset",
+    "📁 Upload your CSV or Excel dataset",
     type=["csv", "xlsx"]
 )
 
 
-# ===================================================
-# PROCESS UPLOADED DATASET
-# ===================================================
+# =========================================================
+# NO FILE UPLOADED
+# =========================================================
 
-if uploaded_file is not None:
+if uploaded_file is None:
 
-    # ------------------------------------------------
+    st.info(
+        "👆 Please upload a CSV or Excel dataset to get started."
+    )
+
+    st.write("## 🚀 How AskData AI Works")
+
+    st.write("1. Upload a CSV or Excel dataset")
+    st.write("2. Preview your dataset")
+    st.write("3. Automatically profile the data")
+    st.write("4. Preprocess the data")
+    st.write("5. Ask questions in natural language")
+    st.write("6. Get analytical results")
+
+    st.write("## 💡 Example Questions")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("• What is the average value?")
+        st.write("• What is the total value?")
+        st.write("• What is the highest value?")
+        st.write("• What is the lowest value?")
+
+    with col2:
+        st.write("• Show top 10 records")
+        st.write("• Show top 10 customers by spending")
+        st.write("• What is the average value by category?")
+        st.write("• Give me a summary of the dataset")
+
+
+# =========================================================
+# FILE UPLOADED
+# =========================================================
+
+else:
+
+    # =====================================================
     # LOAD DATASET
-    # ------------------------------------------------
+    # =====================================================
 
-    df, error = load_dataset(uploaded_file)
+    try:
+
+        loaded_data = load_dataset(uploaded_file)
+
+        # -------------------------------------------------
+        # IMPORTANT:
+        # load_dataset() may return:
+        #
+        # 1. A DataFrame
+        # OR
+        # 2. A tuple containing a DataFrame
+        #
+        # We handle both cases here.
+        # -------------------------------------------------
+
+        if isinstance(loaded_data, tuple):
+
+            # Find the DataFrame inside the tuple
+            df = None
+
+            for item in loaded_data:
+
+                if isinstance(item, pd.DataFrame):
+                    df = item
+                    break
+
+            if df is None:
+
+                st.error(
+                    "The dataset loader returned a tuple, "
+                    "but no DataFrame was found inside it."
+                )
+
+                st.stop()
+
+        elif isinstance(loaded_data, pd.DataFrame):
+
+            df = loaded_data
+
+        else:
+
+            st.error(
+                "The dataset loader did not return a valid DataFrame."
+            )
+
+            st.stop()
 
 
-    # ------------------------------------------------
-    # ERROR HANDLING
-    # ------------------------------------------------
+        # -------------------------------------------------
+        # CHECK EMPTY DATASET
+        # -------------------------------------------------
 
-    if error:
+        if df.empty:
 
-        st.error(error)
+            st.error(
+                "The uploaded dataset is empty."
+            )
+
+            st.stop()
 
 
-    else:
+        # -------------------------------------------------
+        # SUCCESS MESSAGE
+        # -------------------------------------------------
 
-        st.success("✅ Dataset uploaded successfully!")
-
-
-        # =================================================
-        # DATASET PREVIEW
-        # =================================================
-
-        st.divider()
-
-        st.subheader("📄 Dataset Preview")
-
-        st.dataframe(
-            df.head(10),
-            use_container_width=True
+        st.success(
+            "Dataset loaded successfully! ✅"
         )
 
-        st.write(
-            f"**Rows:** {df.shape[0]}  |  "
-            f"**Columns:** {df.shape[1]}"
+
+    except Exception as e:
+
+        st.error(
+            f"Error while loading dataset: {e}"
+        )
+
+        st.stop()
+
+
+    # =====================================================
+    # DATASET OVERVIEW
+    # =====================================================
+
+    st.header("📊 Dataset Overview")
+
+
+    col1, col2, col3, col4 = st.columns(4)
+
+
+    with col1:
+
+        st.metric(
+            "Rows",
+            df.shape[0]
         )
 
 
-        # =================================================
-        # DATASET PROFILING
-        # =================================================
+    with col2:
 
-        st.divider()
+        st.metric(
+            "Columns",
+            df.shape[1]
+        )
 
-        st.subheader("📋 Dataset Profile")
+
+    with col3:
+
+        st.metric(
+            "Missing Values",
+            int(df.isnull().sum().sum())
+        )
+
+
+    with col4:
+
+        st.metric(
+            "Duplicate Rows",
+            int(df.duplicated().sum())
+        )
+
+
+    # =====================================================
+    # DATASET PREVIEW
+    # =====================================================
+
+    st.header("👀 Dataset Preview")
+
+    st.dataframe(
+        df.head(10),
+        use_container_width=True
+    )
+
+
+    # =====================================================
+    # COMPLETE COLUMN LIST
+    # =====================================================
+
+    with st.expander("📋 View All Columns"):
+
+        for i, column in enumerate(df.columns, start=1):
+
+            st.write(
+                f"{i}. {column}"
+            )
+
+
+    # =====================================================
+    # DATASET PROFILING
+    # =====================================================
+
+    st.header("🔍 Dataset Profiling")
+
+
+    try:
 
         profile = profile_dataset(df)
 
-        basic_info = profile["basic_info"]
+
+        # -------------------------------------------------
+        # IF PROFILE IS A DICTIONARY
+        # -------------------------------------------------
+
+        if isinstance(profile, dict):
 
 
-        # =================================================
-        # ROWS AND COLUMNS
-        # =================================================
+            # ---------------------------------------------
+            # BASIC PROFILE INFORMATION
+            # ---------------------------------------------
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-
-            st.metric(
-                "Number of Rows",
-                basic_info["rows"]
-            )
-
-        with col2:
-
-            st.metric(
-                "Number of Columns",
-                basic_info["columns"]
-            )
+            profile_col1, profile_col2 = st.columns(2)
 
 
-        # =================================================
-        # COLUMN DATA TYPES
-        # =================================================
+            with profile_col1:
 
-        st.write("### 🔤 Column Data Types")
+                st.write("### 🔢 Numerical Columns")
 
-        data_types_df = pd.DataFrame(
-            list(profile["data_types"].items()),
-            columns=["Column", "Data Type"]
-        )
+                numeric_columns = profile.get(
+                    "numeric_columns",
+                    []
+                )
 
-        st.dataframe(
-            data_types_df,
-            use_container_width=True
-        )
+                st.write(numeric_columns)
 
 
-        # =================================================
-        # MISSING VALUES
-        # =================================================
+            with profile_col2:
 
-        st.write("### ⚠️ Missing Values")
+                st.write("### 🔤 Categorical Columns")
 
-        missing_df = pd.DataFrame(
-            list(profile["missing_values"].items()),
-            columns=["Column", "Missing Values"]
-        )
+                categorical_columns = profile.get(
+                    "categorical_columns",
+                    []
+                )
 
-        st.dataframe(
-            missing_df,
-            use_container_width=True
-        )
+                st.write(categorical_columns)
 
 
-        # =================================================
-        # UNIQUE VALUES
-        # =================================================
+            # ---------------------------------------------
+            # DATA TYPES
+            # ---------------------------------------------
 
-        st.write("### 🔢 Unique Values")
+            if "dtypes" in profile:
 
-        unique_df = pd.DataFrame(
-            list(profile["unique_values"].items()),
-            columns=["Column", "Unique Values"]
-        )
+                st.write("### 🧾 Data Types")
 
-        st.dataframe(
-            unique_df,
-            use_container_width=True
-        )
+                st.write(
+                    profile["dtypes"]
+                )
 
 
-        # =================================================
-        # NUMERICAL COLUMNS
-        # =================================================
+            # ---------------------------------------------
+            # MISSING VALUES
+            # ---------------------------------------------
 
-        st.write("### 🔢 Numerical Columns")
+            if "missing_values" in profile:
 
-        numerical_columns = profile["numerical_columns"]
+                st.write("### ❓ Missing Values")
 
-        if numerical_columns:
-
-            st.write(numerical_columns)
-
-        else:
-
-            st.info("No numerical columns found.")
+                st.write(
+                    profile["missing_values"]
+                )
 
 
-        # =================================================
-        # CATEGORICAL COLUMNS
-        # =================================================
+            # ---------------------------------------------
+            # UNIQUE VALUES
+            # ---------------------------------------------
 
-        st.write("### 🏷️ Categorical Columns")
+            if "unique_values" in profile:
 
-        categorical_columns = profile["categorical_columns"]
+                st.write("### 🔢 Unique Values")
 
-        if categorical_columns:
-
-            st.write(categorical_columns)
-
-        else:
-
-            st.info("No categorical columns found.")
+                st.write(
+                    profile["unique_values"]
+                )
 
 
-        # =================================================
-        # DESCRIPTIVE STATISTICS
-        # =================================================
+            # ---------------------------------------------
+            # DESCRIPTIVE STATISTICS
+            # ---------------------------------------------
 
-        st.write("### 📊 Descriptive Statistics")
+            if "descriptive_statistics" in profile:
 
-        statistics = profile["statistics"]
+                st.write(
+                    "### 📈 Descriptive Statistics"
+                )
 
-        if not statistics.empty:
+                stats = profile[
+                    "descriptive_statistics"
+                ]
 
-            st.dataframe(
-                statistics,
-                use_container_width=True
-            )
+                if isinstance(stats, pd.DataFrame):
+
+                    st.dataframe(
+                        stats,
+                        use_container_width=True
+                    )
+
+                else:
+
+                    st.write(stats)
+
 
         else:
 
             st.info(
-                "No numerical columns available "
-                "for descriptive statistics."
+                "Dataset profiling completed."
             )
 
 
-        # =================================================
-        # DATA PREPROCESSING
-        # =================================================
+    except Exception as e:
 
-        st.divider()
-
-        st.subheader("🧹 Data Preprocessing")
-
-        processed_df, preprocessing_info = preprocess_dataset(df)
-
-
-        # =================================================
-        # PREPROCESSING SUMMARY
-        # =================================================
-
-        st.write("### 📌 Preprocessing Summary")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-
-            st.metric(
-                "Original Rows",
-                preprocessing_info["original_rows"]
-            )
-
-        with col2:
-
-            st.metric(
-                "Processed Rows",
-                preprocessing_info["processed_rows"]
-            )
-
-        with col3:
-
-            st.metric(
-                "Duplicates Removed",
-                preprocessing_info["duplicates_removed"]
-            )
-
-
-        # =================================================
-        # MISSING VALUE SUMMARY
-        # =================================================
-
-        col4, col5 = st.columns(2)
-
-        with col4:
-
-            st.metric(
-                "Missing Values Before",
-                preprocessing_info["missing_values_before"]
-            )
-
-        with col5:
-
-            st.metric(
-                "Missing Values After",
-                preprocessing_info["missing_values_after"]
-            )
-
-
-        # =================================================
-        # CLEANED DATASET
-        # =================================================
-
-        st.write("### 🧼 Cleaned Dataset")
-
-        st.dataframe(
-            processed_df.head(10),
-            use_container_width=True
+        st.warning(
+            f"Profiling could not be completed: {e}"
         )
 
 
-        # =================================================
-        # PREPROCESSING COMPLETED MESSAGE
-        # =================================================
+    # =====================================================
+    # DATA PREPROCESSING
+    # =====================================================
 
-        if preprocessing_info["missing_values_after"] == 0:
+    st.header("🧹 Data Preprocessing")
 
-            st.success(
-                "✅ Data preprocessing completed successfully. "
-                "No missing values remain in the processed dataset."
-            )
+
+    try:
+
+        processed_data = preprocess_dataset(df)
+
+
+        # -------------------------------------------------
+        # PREPROCESSOR MAY RETURN A TUPLE
+        # -------------------------------------------------
+
+        if isinstance(processed_data, tuple):
+
+            processed_df = None
+
+            for item in processed_data:
+
+                if isinstance(item, pd.DataFrame):
+
+                    processed_df = item
+                    break
+
+
+            if processed_df is None:
+
+                st.warning(
+                    "Preprocessing did not return a DataFrame. "
+                    "The original dataset will be used."
+                )
+
+                processed_df = df.copy()
+
+
+        elif isinstance(processed_data, pd.DataFrame):
+
+            processed_df = processed_data
+
 
         else:
 
             st.warning(
-                "⚠️ Some missing values remain after preprocessing."
+                "Preprocessing did not return a valid DataFrame. "
+                "The original dataset will be used."
+            )
+
+            processed_df = df.copy()
+
+
+        # -------------------------------------------------
+        # EMPTY PROCESSED DATASET CHECK
+        # -------------------------------------------------
+
+        if processed_df.empty:
+
+            st.warning(
+                "The processed dataset is empty. "
+                "The original dataset will be used."
+            )
+
+            processed_df = df.copy()
+
+
+        st.success(
+            "Data preprocessing completed successfully! ✅"
+        )
+
+
+        # -------------------------------------------------
+        # PREPROCESSING INFORMATION
+        # -------------------------------------------------
+
+        prep_col1, prep_col2, prep_col3 = st.columns(3)
+
+
+        with prep_col1:
+
+            st.metric(
+                "Original Rows",
+                df.shape[0]
             )
 
 
-        # =================================================
-        # ASKDATA AI QUERY ENGINE
-        # =================================================
+        with prep_col2:
 
-        st.divider()
+            st.metric(
+                "Processed Rows",
+                processed_df.shape[0]
+            )
 
-        st.subheader("💬 Ask a Question")
+
+        with prep_col3:
+
+            st.metric(
+                "Processed Columns",
+                processed_df.shape[1]
+            )
+
+
+        # -------------------------------------------------
+        # VIEW PROCESSED DATA
+        # -------------------------------------------------
+
+        with st.expander(
+            "👀 View Processed Dataset"
+        ):
+
+            st.dataframe(
+                processed_df.head(20),
+                use_container_width=True
+            )
+
+
+    except Exception as e:
+
+        st.warning(
+            f"Preprocessing could not be completed: {e}"
+        )
+
+        processed_df = df.copy()
+
+
+    # =====================================================
+    # NATURAL LANGUAGE QUERY SECTION
+    # =====================================================
+
+    st.divider()
+
+    st.header("💬 AskData AI")
+
+    st.write(
+        "Ask a question about your uploaded dataset "
+        "using simple English."
+    )
+
+
+    # =====================================================
+    # EXAMPLE QUESTIONS
+    # =====================================================
+
+    st.write("### 💡 Example Questions")
+
+
+    example_col1, example_col2 = st.columns(2)
+
+
+    with example_col1:
 
         st.write(
-            "Ask a question about your uploaded dataset."
+            "• What is the average purchase amount?"
+        )
+
+        st.write(
+            "• What is the total sales?"
+        )
+
+        st.write(
+            "• What is the highest value?"
+        )
+
+        st.write(
+            "• What is the lowest value?"
         )
 
 
-        # -------------------------------------------------
-        # USER QUERY
-        # -------------------------------------------------
+    with example_col2:
 
-        user_query = st.text_input(
-            "Enter your question:",
-            placeholder="Example: How many rows are there?"
+        st.write(
+            "• Show top 10 customers by spending."
+        )
+
+        st.write(
+            "• What is the average value by category?"
+        )
+
+        st.write(
+            "• Show the top 5 records."
+        )
+
+        st.write(
+            "• Give me a summary of the dataset."
         )
 
 
-        # -------------------------------------------------
-        # PROCESS USER QUERY
-        # -------------------------------------------------
+    # =====================================================
+    # QUERY INPUT
+    # =====================================================
 
-        if user_query:
+    user_query = st.text_input(
+        "🔎 Enter your question:",
+        placeholder=(
+            "Example: What is the average purchase amount?"
+        )
+    )
 
-            result = process_query(
-                processed_df,
-                user_query
-            )
 
+    # =====================================================
+    # PROCESS USER QUERY
+    # =====================================================
 
-            # ---------------------------------------------
-            # TEXT RESULT
-            # ---------------------------------------------
+    if user_query.strip() != "":
 
-            if result["type"] == "text":
+        with st.spinner(
+            "🤖 Analyzing your question..."
+        ):
 
-                st.info(
-                    result["result"]
+            try:
+
+                result = process_query(
+                    processed_df,
+                    user_query
                 )
 
 
-            # ---------------------------------------------
-            # SUMMARY RESULT
-            # ---------------------------------------------
+                # =================================================
+                # RESULT VALIDATION
+                # =================================================
 
-            elif result["type"] == "summary":
+                if not isinstance(result, dict):
 
-                summary = result["result"]
+                    st.error(
+                        "The query engine returned an invalid result."
+                    )
 
-                st.write("### 📊 Dataset Summary")
+                    st.write(result)
 
-                st.write(
-                    f"**Rows:** {summary['rows']}"
+                    st.stop()
+
+
+                # =================================================
+                # TEXT RESULT
+                # =================================================
+
+                if result.get("type") == "text":
+
+                    st.success(
+                        result.get(
+                            "message",
+                            "No result message was returned."
+                        )
+                    )
+
+
+                # =================================================
+                # DATAFRAME RESULT
+                # =================================================
+
+                elif result.get("type") == "dataframe":
+
+                    st.write("### 📋 Query Result")
+
+                    query_data = result.get(
+                        "data"
+                    )
+
+
+                    if isinstance(
+                        query_data,
+                        pd.DataFrame
+                    ):
+
+                        st.dataframe(
+                            query_data,
+                            use_container_width=True
+                        )
+
+                    else:
+
+                        st.write(
+                            query_data
+                        )
+
+
+                # =================================================
+                # SUMMARY RESULT
+                # =================================================
+
+                elif result.get("type") == "summary":
+
+                    st.write(
+                        "### 📊 Dataset Summary"
+                    )
+
+
+                    summary = result.get(
+                        "data",
+                        {}
+                    )
+
+
+                    if isinstance(
+                        summary,
+                        dict
+                    ):
+
+                        summary_col1, summary_col2, summary_col3 = (
+                            st.columns(3)
+                        )
+
+
+                        with summary_col1:
+
+                            st.metric(
+                                "Rows",
+                                summary.get(
+                                    "rows",
+                                    processed_df.shape[0]
+                                )
+                            )
+
+
+                        with summary_col2:
+
+                            st.metric(
+                                "Columns",
+                                summary.get(
+                                    "columns",
+                                    processed_df.shape[1]
+                                )
+                            )
+
+
+                        with summary_col3:
+
+                            st.metric(
+                                "Missing Values",
+                                summary.get(
+                                    "missing_values",
+                                    int(
+                                        processed_df
+                                        .isnull()
+                                        .sum()
+                                        .sum()
+                                    )
+                                )
+                            )
+
+
+                        # -----------------------------------------
+                        # NUMERICAL COLUMNS
+                        # -----------------------------------------
+
+                        st.write(
+                            "#### 🔢 Numerical Columns"
+                        )
+
+                        st.write(
+                            summary.get(
+                                "numeric_columns",
+                                []
+                            )
+                        )
+
+
+                        # -----------------------------------------
+                        # CATEGORICAL COLUMNS
+                        # -----------------------------------------
+
+                        st.write(
+                            "#### 🔤 Categorical Columns"
+                        )
+
+                        st.write(
+                            summary.get(
+                                "categorical_columns",
+                                []
+                            )
+                        )
+
+
+                    else:
+
+                        st.write(
+                            summary
+                        )
+
+
+                # =================================================
+                # ERROR RESULT
+                # =================================================
+
+                elif result.get("type") == "error":
+
+                    st.error(
+                        result.get(
+                            "message",
+                            "An unknown error occurred."
+                        )
+                    )
+
+
+                # =================================================
+                # UNKNOWN RESULT TYPE
+                # =================================================
+
+                else:
+
+                    st.warning(
+                        "The query engine returned an unknown result."
+                    )
+
+                    st.write(
+                        result
+                    )
+
+
+            except Exception as e:
+
+                st.error(
+                    "An error occurred while processing "
+                    "your question."
                 )
 
-                st.write(
-                    f"**Columns:** {summary['columns']}"
-                )
-
-                st.write(
-                    "**Column Names:**"
-                )
-
-                st.write(
-                    summary["column_names"]
-                )
-
-                st.write(
-                    "**Numerical Columns:**"
-                )
-
-                st.write(
-                    summary["numerical_columns"]
-                )
-
-                st.write(
-                    "**Categorical Columns:**"
-                )
-
-                st.write(
-                    summary["categorical_columns"]
-                )
+                st.exception(e)
 
 
-            # ---------------------------------------------
-            # DATAFRAME RESULT
-            # ---------------------------------------------
+# =========================================================
+# FOOTER
+# =========================================================
 
-            elif result["type"] == "dataframe":
+st.divider()
 
-                st.write("### 📊 Result")
+st.caption(
+    "AskData AI | Intelligent Data Analyst Assistant"
+)
 
-                st.dataframe(
-                    result["result"],
-                    use_container_width=True
-                )
-
-
-            # ---------------------------------------------
-            # ERROR RESULT
-            # ---------------------------------------------
-
-            elif result["type"] == "error":
-
-                st.warning(
-                    result["result"]
-                )

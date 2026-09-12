@@ -1,5 +1,6 @@
-import pandas as pd
+
 import re
+import pandas as pd
 
 
 # ============================================================
@@ -7,96 +8,330 @@ import re
 # ============================================================
 
 def normalize_text(text):
-    """
-    Normalize text so that different forms of column names
-    and user questions can be compared.
-    """
-
-    text = str(text).lower()
-
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-
+    """Convert text to lowercase and normalize spaces/symbols."""
+    text = str(text).lower().strip()
+    text = text.replace("_", " ")
+    text = text.replace("-", " ")
     text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
+    return text
 
 
 # ============================================================
-# GET NUMERICAL COLUMNS
+# COLUMN DETECTION
 # ============================================================
 
 def get_numeric_columns(df):
+    """Return numerical columns."""
+    return df.select_dtypes(include="number").columns.tolist()
 
-    return df.select_dtypes(
-        include="number"
-    ).columns.tolist()
-
-
-# ============================================================
-# GET CATEGORICAL COLUMNS
-# ============================================================
 
 def get_categorical_columns(df):
+    """Return categorical/text columns."""
+    return df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
-    return df.select_dtypes(
-        exclude="number"
-    ).columns.tolist()
-
-
-# ============================================================
-# FIND COLUMN FROM USER QUESTION
-# ============================================================
 
 def find_column(df, query):
-
+    """
+    Find a column explicitly mentioned in the user's query.
+    Uses normalized matching.
+    """
     normalized_query = normalize_text(query)
 
-    columns = df.columns.tolist()
-
-    # --------------------------------------------------------
-    # Exact column matching
-    # --------------------------------------------------------
-
-    for column in sorted(
-        columns,
-        key=lambda x: len(normalize_text(x)),
-        reverse=True
-    ):
-
+    # Exact normalized column match
+    for column in df.columns:
         normalized_column = normalize_text(column)
 
         if normalized_column in normalized_query:
-
             return column
 
-    return None
+    # Token-based matching
+    best_column = None
+    best_score = 0
+
+    query_words = set(normalized_query.split())
+
+    for column in df.columns:
+        column_words = set(normalize_text(column).split())
+
+        if not column_words:
+            continue
+
+        score = len(column_words.intersection(query_words))
+
+        if score > best_score:
+            best_score = score
+            best_column = column
+
+    return best_column if best_score > 0 else None
 
 
 # ============================================================
-# FIND GROUP COLUMN
+# METRIC COLUMN DETECTION
 # ============================================================
 
-def find_group_column(df, query):
+def find_metric_column(df, query):
+    """
+    Identify the numerical column that the user wants to analyze.
+    Designed to work with different datasets.
+    """
 
-    # First try exact column name
-    exact_column = find_column(df, query)
+    numeric_columns = get_numeric_columns(df)
 
-    if exact_column is not None:
-
-        return exact_column
+    if not numeric_columns:
+        return None
 
     normalized_query = normalize_text(query)
 
-    query_words = set(
-        normalized_query.split()
-    )
-
     # --------------------------------------------------------
-    # Generic semantic mappings
+    # 1. Strong exact column matching
     # --------------------------------------------------------
 
-    mappings = {
+    for column in numeric_columns:
+        normalized_column = normalize_text(column)
 
+        if normalized_column in normalized_query:
+            return column
+
+    # --------------------------------------------------------
+    # 2. Semantic metric mappings
+    # --------------------------------------------------------
+
+    metric_keywords = {
+        "purchase_amount": [
+            "purchase amount",
+            "purchase",
+            "spending",
+            "spend",
+            "amount spent",
+            "customer spending",
+            "customer spend"
+        ],
+
+        "sales": [
+            "sales",
+            "sale"
+        ],
+
+        "revenue": [
+            "revenue",
+            "income"
+        ],
+
+        "profit": [
+            "profit",
+            "profits",
+            "earnings"
+        ],
+
+        "salary": [
+            "salary",
+            "salaries",
+            "pay",
+            "income"
+        ],
+
+        "price": [
+            "price",
+            "cost",
+            "amount"
+        ],
+
+        "rating": [
+            "rating",
+            "ratings",
+            "score",
+            "review"
+        ],
+
+        "age": [
+            "age"
+        ],
+
+        "quantity": [
+            "quantity",
+            "qty",
+            "units",
+            "number of units"
+        ],
+
+        "count": [
+            "count",
+            "number",
+            "records",
+            "rows"
+        ]
+    }
+
+    # --------------------------------------------------------
+    # 3. Score each numerical column
+    # --------------------------------------------------------
+
+    best_column = None
+    best_score = 0
+
+    for column in numeric_columns:
+
+        column_name = normalize_text(column)
+
+        score = 0
+
+        # Column words
+        column_words = set(column_name.split())
+
+        # Query words
+        query_words = set(normalized_query.split())
+
+        # Word overlap
+        score += len(column_words.intersection(query_words)) * 5
+
+        # ----------------------------------------------------
+        # Purchase amount
+        # ----------------------------------------------------
+
+        if (
+            "purchase" in normalized_query
+            and "amount" in normalized_query
+        ):
+            if "purchase" in column_name and "amount" in column_name:
+                score += 100
+
+        elif "purchase" in normalized_query:
+            if "purchase" in column_name:
+                score += 80
+
+        # ----------------------------------------------------
+        # Spending
+        # ----------------------------------------------------
+
+        if any(word in normalized_query for word in ["spending", "spend"]):
+            if any(word in column_name for word in ["purchase", "spending", "amount"]):
+                score += 70
+
+        # ----------------------------------------------------
+        # Sales
+        # ----------------------------------------------------
+
+        if "sales" in normalized_query:
+            if "sales" in column_name:
+                score += 90
+
+        # ----------------------------------------------------
+        # Revenue
+        # ----------------------------------------------------
+
+        if "revenue" in normalized_query:
+            if "revenue" in column_name:
+                score += 90
+
+        # ----------------------------------------------------
+        # Profit
+        # ----------------------------------------------------
+
+        if "profit" in normalized_query:
+            if "profit" in column_name:
+                score += 90
+
+        # ----------------------------------------------------
+        # Salary
+        # ----------------------------------------------------
+
+        if "salary" in normalized_query:
+            if "salary" in column_name:
+                score += 90
+
+        # ----------------------------------------------------
+        # Rating
+        # ----------------------------------------------------
+
+        if any(word in normalized_query for word in ["rating", "score"]):
+            if any(word in column_name for word in ["rating", "score"]):
+                score += 90
+
+        # ----------------------------------------------------
+        # Age
+        # ----------------------------------------------------
+
+        if "age" in normalized_query:
+            if "age" in column_name:
+                score += 90
+
+        # ----------------------------------------------------
+        # Quantity
+        # ----------------------------------------------------
+
+        if any(word in normalized_query for word in ["quantity", "qty", "units"]):
+            if any(word in column_name for word in ["quantity", "qty", "units"]):
+                score += 90
+
+        if score > best_score:
+            best_score = score
+            best_column = column
+
+    # --------------------------------------------------------
+    # 4. Fallback
+    # --------------------------------------------------------
+
+    if best_column is not None:
+        return best_column
+
+    # Avoid blindly choosing Age.
+    # Prefer common business metrics.
+    priority_words = [
+        "amount",
+        "sales",
+        "revenue",
+        "profit",
+        "price",
+        "cost",
+        "quantity",
+        "rating"
+    ]
+
+    for word in priority_words:
+        for column in numeric_columns:
+            if word in normalize_text(column):
+                return column
+
+    # Last fallback: first numerical column
+    return numeric_columns[0]
+
+
+# ============================================================
+# GROUP COLUMN DETECTION
+# ============================================================
+
+def find_group_column(df, query):
+    """
+    Detect the categorical column used for grouping.
+
+    Examples:
+    average sales by gender
+    total revenue by category
+    count customers by location
+    """
+
+    normalized_query = normalize_text(query)
+
+    categorical_columns = get_categorical_columns(df)
+
+    if not categorical_columns:
+        return None
+
+    # --------------------------------------------------------
+    # 1. Explicit column mentioned
+    # --------------------------------------------------------
+
+    for column in categorical_columns:
+        normalized_column = normalize_text(column)
+
+        if normalized_column in normalized_query:
+            return column
+
+    # --------------------------------------------------------
+    # 2. Semantic mappings
+    # --------------------------------------------------------
+
+    semantic_groups = {
         "customer": [
             "customer",
             "customers",
@@ -114,9 +349,7 @@ def find_group_column(df, query):
         "employee": [
             "employee",
             "employees",
-            "staff",
-            "worker",
-            "workers"
+            "staff"
         ],
 
         "department": [
@@ -134,7 +367,9 @@ def find_group_column(df, query):
 
         "category": [
             "category",
-            "categories"
+            "categories",
+            "type",
+            "types"
         ],
 
         "city": [
@@ -172,398 +407,170 @@ def find_group_column(df, query):
         "season": [
             "season",
             "seasons"
+        ],
+
+        "payment": [
+            "payment",
+            "payment method",
+            "method"
+        ],
+
+        "shipping": [
+            "shipping",
+            "shipping type"
+        ],
+
+        "subscription": [
+            "subscription",
+            "subscription status"
         ]
     }
 
     # --------------------------------------------------------
-    # Search semantic matches
+    # 3. Score candidate columns
     # --------------------------------------------------------
 
-    for semantic, keywords in mappings.items():
+    best_column = None
+    best_score = 0
 
-        if not any(
-            keyword in query_words
-            for keyword in keywords
-        ):
-            continue
+    for column in categorical_columns:
 
-        best_column = None
-        best_score = 0
+        column_name = normalize_text(column)
 
-        for column in df.columns:
+        for semantic_key, keywords in semantic_groups.items():
 
-            column_text = normalize_text(column)
+            if any(keyword in normalized_query for keyword in keywords):
 
-            column_words = set(
-                column_text.split()
-            )
+                if semantic_key in column_name:
+                    score = 100
 
-            score = 0
+                    if score > best_score:
+                        best_score = score
+                        best_column = column
 
-            for keyword in keywords:
+                # Individual keyword matching
+                for keyword in keywords:
+                    if keyword in column_name and keyword in normalized_query:
+                        score = 80
 
-                if keyword in column_words:
+                        if score > best_score:
+                            best_score = score
+                            best_column = column
 
-                    score += 3
-
-                elif keyword in column_text:
-
-                    score += 1
-
-            # Strong ID matching
-            if semantic == "customer":
-
-                if (
-                    "customer" in column_text
-                    and "id" in column_text
-                ):
-
-                    score += 10
-
-            if semantic == "user":
-
-                if (
-                    "user" in column_text
-                    and "id" in column_text
-                ):
-
-                    score += 10
-
-            if score > best_score:
-
-                best_score = score
-                best_column = column
-
-        if best_column is not None:
-
-            return best_column
-
-    return None
+    return best_column
 
 
 # ============================================================
-# FIND NUMERICAL METRIC
-# ============================================================
-
-def find_metric_column(df, query):
-
-    numeric_columns = get_numeric_columns(df)
-
-    if not numeric_columns:
-
-        return None
-
-    # --------------------------------------------------------
-    # Exact column matching
-    # --------------------------------------------------------
-
-    normalized_query = normalize_text(query)
-
-    for column in sorted(
-        numeric_columns,
-        key=lambda x: len(normalize_text(x)),
-        reverse=True
-    ):
-
-        normalized_column = normalize_text(column)
-
-        if normalized_column in normalized_query:
-
-            return column
-
-    # --------------------------------------------------------
-    # Semantic metric mapping
-    # --------------------------------------------------------
-
-    mappings = {
-
-        "spending": [
-            "spending",
-            "spend",
-            "spent",
-            "purchase",
-            "purchases",
-            "amount",
-            "buying"
-        ],
-
-        "sales": [
-            "sales",
-            "sale"
-        ],
-
-        "revenue": [
-            "revenue",
-            "income",
-            "earning",
-            "earnings"
-        ],
-
-        "profit": [
-            "profit",
-            "profits"
-        ],
-
-        "salary": [
-            "salary",
-            "salaries",
-            "pay",
-            "wage",
-            "wages"
-        ],
-
-        "price": [
-            "price",
-            "prices",
-            "cost",
-            "costs"
-        ],
-
-        "rating": [
-            "rating",
-            "ratings",
-            "score",
-            "scores"
-        ],
-
-        "age": [
-            "age",
-            "ages"
-        ],
-
-        "quantity": [
-            "quantity",
-            "quantities",
-            "units"
-        ]
-    }
-
-    query_words = set(
-        normalized_query.split()
-    )
-
-    # --------------------------------------------------------
-    # Search each semantic group
-    # --------------------------------------------------------
-
-    for semantic, keywords in mappings.items():
-
-        if not any(
-            keyword in query_words
-            for keyword in keywords
-        ):
-            continue
-
-        best_column = None
-        best_score = 0
-
-        for column in numeric_columns:
-
-            column_text = normalize_text(column)
-
-            column_words = set(
-                column_text.split()
-            )
-
-            score = 0
-
-            for keyword in keywords:
-
-                if keyword in column_words:
-
-                    score += 3
-
-                elif keyword in column_text:
-
-                    score += 1
-
-            # Special case:
-            # spending -> purchase amount
-
-            if semantic == "spending":
-
-                if (
-                    "purchase" in column_words
-                    and "amount" in column_words
-                ):
-
-                    score += 15
-
-            # sales -> sales column
-
-            if semantic == "sales":
-
-                if "sales" in column_words:
-
-                    score += 15
-
-            # revenue -> revenue column
-
-            if semantic == "revenue":
-
-                if "revenue" in column_words:
-
-                    score += 15
-
-            # profit -> profit column
-
-            if semantic == "profit":
-
-                if "profit" in column_words:
-
-                    score += 15
-
-            # salary -> salary column
-
-            if semantic == "salary":
-
-                if "salary" in column_words:
-
-                    score += 15
-
-            # rating -> rating column
-
-            if semantic == "rating":
-
-                if "rating" in column_words:
-
-                    score += 15
-
-            if score > best_score:
-
-                best_score = score
-                best_column = column
-
-        if best_column is not None:
-
-            return best_column
-
-    # --------------------------------------------------------
-    # If there is only one numerical column
-    # --------------------------------------------------------
-
-    if len(numeric_columns) == 1:
-
-        return numeric_columns[0]
-
-    return None
-
-
-# ============================================================
-# DETECT OPERATION
+# OPERATION DETECTION
 # ============================================================
 
 def detect_operation(query):
+    """Detect what calculation the user wants."""
 
     query = normalize_text(query)
 
-    words = query.split()
-
     # Average
-    if any(
-        word in words
-        for word in [
-            "average",
-            "avg",
-            "mean"
-        ]
-    ):
+    if any(word in query for word in [
+        "average",
+        "avg",
+        "mean"
+    ]):
+        return "average"
 
-        return "mean"
-
-    # Sum
-    if any(
-        word in words
-        for word in [
-            "total",
-            "sum",
-            "overall"
-        ]
-    ):
-
+    # Sum / total
+    if any(word in query for word in [
+        "total",
+        "sum",
+        "overall"
+    ]):
         return "sum"
 
     # Maximum
-    if any(
-        word in words
-        for word in [
-            "highest",
-            "maximum",
-            "max",
-            "largest"
-        ]
-    ):
-
+    if any(word in query for word in [
+        "maximum",
+        "max",
+        "highest",
+        "largest",
+        "greatest"
+    ]):
         return "max"
 
     # Minimum
-    if any(
-        word in words
-        for word in [
-            "lowest",
-            "minimum",
-            "min",
-            "smallest"
-        ]
-    ):
-
+    if any(word in query for word in [
+        "minimum",
+        "min",
+        "lowest",
+        "smallest"
+    ]):
         return "min"
 
     # Count
-    if (
-        "count" in words
-        or "number" in words
-        or "how many" in query
-    ):
-
+    if any(word in query for word in [
+        "count",
+        "how many",
+        "number of"
+    ]):
         return "count"
 
     return None
 
 
 # ============================================================
-# DETECT TOP / BOTTOM
+# LIMIT DETECTION
 # ============================================================
 
-def detect_limit_type(query):
+def detect_limit(query):
+    """Detect top/bottom N."""
 
     query = normalize_text(query)
 
-    if "top" in query:
+    match = re.search(
+        r"(?:top|highest|bottom|lowest)\s+(\d+)",
+        query
+    )
 
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def detect_limit_type(query):
+    """Return top or bottom."""
+
+    query = normalize_text(query)
+
+    if any(word in query for word in [
+        "top",
+        "highest",
+        "largest",
+        "greatest"
+    ]):
         return "top"
 
-    if "highest" in query:
-
-        return "top"
-
-    if "bottom" in query:
-
-        return "bottom"
-
-    if "lowest" in query:
-
+    if any(word in query for word in [
+        "bottom",
+        "lowest",
+        "smallest"
+    ]):
         return "bottom"
 
     return None
 
 
 # ============================================================
-# FIND NUMBER
+# NUMBER DETECTION
 # ============================================================
 
-def find_number(query, default=10):
+def find_number(query):
+    """Find a number in the query."""
 
-    numbers = re.findall(
-        r"\b\d+\b",
-        str(query)
-    )
+    match = re.search(r"\b(\d+)\b", str(query))
 
-    if numbers:
+    if match:
+        return int(match.group(1))
 
-        return int(numbers[0])
-
-    return default
+    return None
 
 
 # ============================================================
@@ -571,26 +578,126 @@ def find_number(query, default=10):
 # ============================================================
 
 def dataset_summary(df):
+    """Return a basic dataset summary."""
+
+    rows = len(df)
+    columns = len(df.columns)
+
+    numeric_columns = get_numeric_columns(df)
+    categorical_columns = get_categorical_columns(df)
+
+    missing_values = int(df.isnull().sum().sum())
 
     return {
-
-        "rows": len(df),
-
-        "columns": len(df.columns),
-
-        "column_names":
-            df.columns.tolist(),
-
-        "numerical_columns":
-            get_numeric_columns(df),
-
-        "categorical_columns":
-            get_categorical_columns(df)
+        "rows": rows,
+        "columns": columns,
+        "numeric_columns": numeric_columns,
+        "categorical_columns": categorical_columns,
+        "missing_values": missing_values
     }
 
 
 # ============================================================
-# TOP / BOTTOM GROUPED ANALYSIS
+# GROUPED OPERATIONS
+# ============================================================
+
+def grouped_average(df, group_column, metric_column):
+    """Average metric by group."""
+
+    result = (
+        df.groupby(group_column, dropna=False)[metric_column]
+        .mean()
+        .reset_index()
+    )
+
+    result.columns = [
+        group_column,
+        f"Average {metric_column}"
+    ]
+
+    return result.sort_values(
+        by=f"Average {metric_column}",
+        ascending=False
+    ).reset_index(drop=True)
+
+
+def grouped_total(df, group_column, metric_column):
+    """Total metric by group."""
+
+    result = (
+        df.groupby(group_column, dropna=False)[metric_column]
+        .sum()
+        .reset_index()
+    )
+
+    result.columns = [
+        group_column,
+        f"Total {metric_column}"
+    ]
+
+    return result.sort_values(
+        by=f"Total {metric_column}",
+        ascending=False
+    ).reset_index(drop=True)
+
+
+def grouped_count(df, group_column):
+    """Count records by group."""
+
+    result = (
+        df.groupby(group_column, dropna=False)
+        .size()
+        .reset_index(name="Count")
+    )
+
+    return result.sort_values(
+        by="Count",
+        ascending=False
+    ).reset_index(drop=True)
+
+
+def grouped_max(df, group_column, metric_column):
+    """Maximum metric by group."""
+
+    result = (
+        df.groupby(group_column, dropna=False)[metric_column]
+        .max()
+        .reset_index()
+    )
+
+    result.columns = [
+        group_column,
+        f"Maximum {metric_column}"
+    ]
+
+    return result.sort_values(
+        by=f"Maximum {metric_column}",
+        ascending=False
+    ).reset_index(drop=True)
+
+
+def grouped_min(df, group_column, metric_column):
+    """Minimum metric by group."""
+
+    result = (
+        df.groupby(group_column, dropna=False)[metric_column]
+        .min()
+        .reset_index()
+    )
+
+    result.columns = [
+        group_column,
+        f"Minimum {metric_column}"
+    ]
+
+    return result.sort_values(
+        by=f"Minimum {metric_column}",
+        ascending=True
+    ).reset_index(drop=True)
+
+
+# ============================================================
+# TOP / BOTTOM GROUPS
 # ============================================================
 
 def grouped_top_bottom(
@@ -598,473 +705,412 @@ def grouped_top_bottom(
     group_column,
     metric_column,
     limit,
-    direction
+    limit_type="top",
+    operation="sum"
 ):
-
-    grouped = (
-        df.groupby(
-            group_column,
-            dropna=False
-        )[metric_column]
-        .sum()
-        .reset_index()
-    )
-
-    if direction == "top":
-
-        grouped = grouped.sort_values(
-            by=metric_column,
-            ascending=False
-        )
-
-    else:
-
-        grouped = grouped.sort_values(
-            by=metric_column,
-            ascending=True
-        )
-
-    return grouped.head(
-        limit
-    ).reset_index(drop=True)
-
-
-# ============================================================
-# GROUPED AVERAGE
-# ============================================================
-def grouped_average(df, group_column, metric_column):
-
-    result = (
-        df.groupby(
-            group_column,
-            dropna=False,
-            as_index=False
-        )[metric_column]
-        .mean()
-    )
-
-    result = result.rename(
-        columns={
-            metric_column: f"Average {metric_column}"
-        }
-    )
-
-    return result
-
-
-# ============================================================
-# GROUPED TOTAL
-# ============================================================
-
-def grouped_total(df, group_column, metric_column):
-
-    result = (
-        df.groupby(
-            group_column,
-            dropna=False,
-            as_index=False
-        )[metric_column]
-        .sum()
-    )
-
-    result = result.rename(
-        columns={
-            metric_column: f"Total {metric_column}"
-        }
-    )
-
-    return result
-# ============================================================
-# GROUPED COUNT
-# ============================================================
-
-def grouped_count(
-    df,
-    group_column
-):
-
-    return (
-        df.groupby(
-            group_column,
-            dropna=False
-        )
-        .size()
-        .reset_index(
-            name="Count"
-        )
-    )
-
-
-# ============================================================
-# PROCESS QUERY
-# ============================================================
-
-def process_query(df, query):
-
-    if df is None:
-
-        return {
-            "type": "error",
-            "result":
-                "Please upload a dataset first."
-        }
-
-    if df.empty:
-
-        return {
-            "type": "error",
-            "result":
-                "The uploaded dataset is empty."
-        }
-
-    query = str(query).strip()
-
-    if not query:
-
-        return {
-            "type": "error",
-            "result":
-                "Please enter a question."
-        }
-
-    normalized_query = normalize_text(query)
-
-    # ========================================================
-    # DATASET SUMMARY
-    # ========================================================
-
-    if any(
-        phrase in normalized_query
-        for phrase in [
-            "dataset summary",
-            "describe dataset",
-            "dataset information",
-            "dataset info",
-            "about dataset"
-        ]
-    ):
-
-        return {
-            "type": "summary",
-            "result":
-                dataset_summary(df)
-        }
-
-    # ========================================================
-    # ROW COUNT
-    # ========================================================
-
-    if (
-        "how many rows" in normalized_query
-        or "number of rows" in normalized_query
-        or "total rows" in normalized_query
-    ):
-
-        return {
-            "type": "text",
-            "result":
-                f"The dataset contains {len(df)} rows."
-        }
-
-    # ========================================================
-    # COLUMN COUNT
-    # ========================================================
-
-    if (
-        "how many columns" in normalized_query
-        or "number of columns" in normalized_query
-        or "total columns" in normalized_query
-    ):
-
-        return {
-            "type": "text",
-            "result":
-                f"The dataset contains {len(df.columns)} columns."
-        }
-
-    # ========================================================
-    # COLUMN NAMES
-    # ========================================================
-
-    if any(
-        phrase in normalized_query
-        for phrase in [
-            "column names",
-            "list columns",
-            "what columns"
-        ]
-    ):
-
-        return {
-            "type": "dataframe",
-            "result":
-                pd.DataFrame(
-                    {
-                        "Column Name":
-                            df.columns.tolist()
-                    }
-                )
-        }
-
-    # ========================================================
-    # UNIQUE VALUES
-    # ========================================================
-
-    if "unique values" in normalized_query:
-
-        column = find_column(
-            df,
-            query
-        )
-
-        if column is None:
-
-            column = find_group_column(
-                df,
-                query
-            )
-
-        if column:
-
-            values = (
-                df[column]
-                .dropna()
-                .unique()
-                .tolist()
-            )
-
-            return {
-                "type": "dataframe",
-                "result":
-                    pd.DataFrame(
-                        {
-                            column:
-                                values
-                        }
-                    )
-            }
-
-        return {
-            "type": "error",
-            "result":
-                "I could not identify which column you want unique values for."
-        }
-
-    # ========================================================
-    # FIND GROUP / METRIC / OPERATION
-    # ========================================================
-
-    group_column = find_group_column(
-        df,
-        query
-    )
-
-    metric_column = find_metric_column(
-        df,
-        query
-    )
-
-    operation = detect_operation(
-        query
-    )
-
-    limit_type = detect_limit_type(
-        query
-    )
-
-    limit = find_number(
-        query,
-        default=10
-    )
-
-    # ========================================================
-    # TOP / BOTTOM ANALYSIS
-    # ========================================================
-
-    if (
-        group_column is not None
-        and metric_column is not None
-        and limit_type is not None
-    ):
-
-        result = grouped_top_bottom(
-            df,
-            group_column,
-            metric_column,
-            limit,
-            limit_type
-        )
-
-        return {
-            "type": "dataframe",
-            "result": result
-        }
-
-    # ========================================================
-    # GROUPED AVERAGE
-    # ========================================================
-
-    if (
-        group_column is not None
-        and metric_column is not None
-        and operation == "mean"
-    ):
-
+    """
+    Return top/bottom groups.
+
+    Examples:
+    top 10 customers by spending
+    top 5 products by sales
+    bottom 3 departments by salary
+    """
+
+    if operation == "average":
         result = grouped_average(
             df,
             group_column,
             metric_column
         )
 
-        return {
-            "type": "dataframe",
-            "result": result
-        }
+        value_column = f"Average {metric_column}"
 
-    # ========================================================
-    # GROUPED TOTAL
-    # ========================================================
+    elif operation == "max":
+        result = grouped_max(
+            df,
+            group_column,
+            metric_column
+        )
 
-    if (
-        group_column is not None
-        and metric_column is not None
-        and operation == "sum"
-    ):
+        value_column = f"Maximum {metric_column}"
 
+    elif operation == "min":
+        result = grouped_min(
+            df,
+            group_column,
+            metric_column
+        )
+
+        value_column = f"Minimum {metric_column}"
+
+    else:
         result = grouped_total(
             df,
             group_column,
             metric_column
         )
 
+        value_column = f"Total {metric_column}"
+
+    ascending = limit_type == "bottom"
+
+    return (
+        result.sort_values(
+            by=value_column,
+            ascending=ascending
+        )
+        .head(limit)
+        .reset_index(drop=True)
+    )
+
+
+# ============================================================
+# MAIN QUERY PROCESSOR
+# ============================================================
+
+def process_query(df, query):
+    """
+    Main natural-language query processor.
+
+    Supports:
+    - average
+    - total
+    - sum
+    - maximum
+    - minimum
+    - count
+    - group-by
+    - top N
+    - bottom N
+    - dataset summary
+    """
+
+    if df is None or df.empty:
         return {
-            "type": "dataframe",
-            "result": result
+            "type": "error",
+            "message": "The dataset is empty."
+        }
+
+    if query is None or not str(query).strip():
+        return {
+            "type": "error",
+            "message": "Please enter a question."
+        }
+
+    normalized_query = normalize_text(query)
+
+    # ========================================================
+    # DATASET SUMMARY QUESTIONS
+    # ========================================================
+
+    if any(phrase in normalized_query for phrase in [
+        "how many rows",
+        "number of rows",
+        "row count",
+        "how many records",
+        "number of records"
+    ]):
+        return {
+            "type": "text",
+            "message": f"The dataset contains {len(df):,} rows."
+        }
+
+    if any(phrase in normalized_query for phrase in [
+        "how many columns",
+        "number of columns",
+        "column count"
+    ]):
+        return {
+            "type": "text",
+            "message": f"The dataset contains {len(df.columns):,} columns."
+        }
+
+    if any(phrase in normalized_query for phrase in [
+        "dataset summary",
+        "summarize dataset",
+        "summary of dataset",
+        "describe dataset"
+    ]):
+        summary = dataset_summary(df)
+
+        return {
+            "type": "summary",
+            "data": summary
         }
 
     # ========================================================
-    # GROUPED COUNT
+    # DETECT OPERATION
     # ========================================================
 
-    if (
-        group_column is not None
-        and operation == "count"
-    ):
+    operation = detect_operation(normalized_query)
 
-        result = grouped_count(
+    # ========================================================
+    # DETECT TOP / BOTTOM
+    # ========================================================
+
+    limit = detect_limit(normalized_query)
+    limit_type = detect_limit_type(normalized_query)
+
+    # ========================================================
+    # DETECT GROUP ONLY WHEN QUERY EXPLICITLY ASKS FOR GROUPING
+    # ========================================================
+
+    group_column = None
+
+    if (
+        " by " in f" {normalized_query} "
+        or "per " in normalized_query
+        or "each " in normalized_query
+    ):
+        group_column = find_group_column(
             df,
-            group_column
+            normalized_query
+        )
+
+    # ========================================================
+    # COUNT QUESTIONS
+    # ========================================================
+
+    if operation == "count":
+
+        # Grouped count
+        if group_column is not None:
+
+            result = grouped_count(
+                df,
+                group_column
+            )
+
+            if limit is not None and limit_type is not None:
+                if limit_type == "top":
+                    result = result.head(limit)
+                else:
+                    result = result.tail(limit)
+
+                result = result.reset_index(drop=True)
+
+            return {
+                "type": "dataframe",
+                "data": result
+            }
+
+        return {
+            "type": "text",
+            "message": f"The dataset contains {len(df):,} records."
+        }
+
+    # ========================================================
+    # FIND METRIC
+    # ========================================================
+
+    metric_column = find_metric_column(
+        df,
+        normalized_query
+    )
+
+    if metric_column is None:
+        return {
+            "type": "error",
+            "message": "I could not identify a numerical column for this question."
+        }
+
+    # Convert metric safely to numeric
+    numeric_series = pd.to_numeric(
+        df[metric_column],
+        errors="coerce"
+    )
+
+    valid_values = numeric_series.dropna()
+
+    if valid_values.empty:
+        return {
+            "type": "error",
+            "message": f"The column '{metric_column}' does not contain usable numerical values."
+        }
+
+    # ========================================================
+    # GROUPED QUESTIONS
+    # ========================================================
+
+    if group_column is not None:
+
+        # Top / bottom grouped query
+        if limit is not None and limit_type is not None:
+
+            result = grouped_top_bottom(
+                df.assign(**{metric_column: numeric_series}),
+                group_column,
+                metric_column,
+                limit,
+                limit_type,
+                operation if operation in [
+                    "average",
+                    "max",
+                    "min"
+                ] else "sum"
+            )
+
+            return {
+                "type": "dataframe",
+                "data": result
+            }
+
+        # Average by group
+        if operation == "average":
+
+            result = grouped_average(
+                df.assign(**{metric_column: numeric_series}),
+                group_column,
+                metric_column
+            )
+
+            return {
+                "type": "dataframe",
+                "data": result
+            }
+
+        # Total by group
+        if operation == "sum":
+
+            result = grouped_total(
+                df.assign(**{metric_column: numeric_series}),
+                group_column,
+                metric_column
+            )
+
+            return {
+                "type": "dataframe",
+                "data": result
+            }
+
+        # Maximum by group
+        if operation == "max":
+
+            result = grouped_max(
+                df.assign(**{metric_column: numeric_series}),
+                group_column,
+                metric_column
+            )
+
+            return {
+                "type": "dataframe",
+                "data": result
+            }
+
+        # Minimum by group
+        if operation == "min":
+
+            result = grouped_min(
+                df.assign(**{metric_column: numeric_series}),
+                group_column,
+                metric_column
+            )
+
+            return {
+                "type": "dataframe",
+                "data": result
+            }
+
+    # ========================================================
+    # TOP / BOTTOM WITHOUT GROUPING
+    # ========================================================
+
+    if limit is not None and limit_type is not None:
+
+        result = pd.DataFrame({
+            metric_column: valid_values
+        })
+
+        ascending = limit_type == "bottom"
+
+        result = (
+            result.sort_values(
+                by=metric_column,
+                ascending=ascending
+            )
+            .head(limit)
+            .reset_index(drop=True)
         )
 
         return {
             "type": "dataframe",
-            "result": result
+            "data": result
         }
 
     # ========================================================
     # SIMPLE AVERAGE
     # ========================================================
 
-    if (
-        metric_column is not None
-        and operation == "mean"
-    ):
+    if operation == "average":
 
-        value = df[
-            metric_column
-        ].mean()
+        value = valid_values.mean()
 
         return {
             "type": "text",
-            "result":
-                f"The average of '{metric_column}' is {value:.2f}."
+            "message": (
+                f"The average of '{metric_column}' is "
+                f"{value:,.2f}."
+            )
         }
 
     # ========================================================
-    # SIMPLE TOTAL
+    # SIMPLE SUM
     # ========================================================
 
-    if (
-        metric_column is not None
-        and operation == "sum"
-    ):
+    if operation == "sum":
 
-        value = df[
-            metric_column
-        ].sum()
+        value = valid_values.sum()
 
         return {
             "type": "text",
-            "result":
-                f"The total of '{metric_column}' is {value:.2f}."
+            "message": (
+                f"The total of '{metric_column}' is "
+                f"{value:,.2f}."
+            )
         }
 
     # ========================================================
     # SIMPLE MAXIMUM
     # ========================================================
 
-    if (
-        metric_column is not None
-        and operation == "max"
-    ):
+    if operation == "max":
 
-        value = df[
-            metric_column
-        ].max()
+        value = valid_values.max()
 
         return {
             "type": "text",
-            "result":
-                f"The highest value of '{metric_column}' is {value}."
+            "message": (
+                f"The maximum of '{metric_column}' is "
+                f"{value:,.2f}."
+            )
         }
 
     # ========================================================
     # SIMPLE MINIMUM
     # ========================================================
 
-    if (
-        metric_column is not None
-        and operation == "min"
-    ):
+    if operation == "min":
 
-        value = df[
-            metric_column
-        ].min()
+        value = valid_values.min()
 
         return {
             "type": "text",
-            "result":
-                f"The lowest value of '{metric_column}' is {value}."
+            "message": (
+                f"The minimum of '{metric_column}' is "
+                f"{value:,.2f}."
+            )
         }
 
     # ========================================================
-    # TOP RECORDS
+    # SHOW NUMERICAL COLUMN
     # ========================================================
 
-    if (
-        "top records" in normalized_query
-        or "top rows" in normalized_query
-    ):
+    if metric_column is not None:
 
         return {
             "type": "dataframe",
-            "result":
-                df.head(limit)
-        }
-
-    # ========================================================
-    # BOTTOM RECORDS
-    # ========================================================
-
-    if (
-        "bottom records" in normalized_query
-        or "bottom rows" in normalized_query
-    ):
-
-        return {
-            "type": "dataframe",
-            "result":
-                df.tail(limit)
+            "data": df[[metric_column]].head(10)
         }
 
     # ========================================================
@@ -1073,10 +1119,11 @@ def process_query(df, query):
 
     return {
         "type": "error",
-        "result":
-            "I could not understand this question yet. "
-            "Try asking about rows, columns, average, "
-            "total, highest, lowest, unique values, "
-            "top records, bottom records, counts, "
-            "or grouped analysis."
+        "message": (
+            "I could not understand the question. "
+            "Try asking something like: "
+            "'What is the average sales?', "
+            "'What is the total revenue?', or "
+            "'What is the average sales by category?'"
+        )
     }
